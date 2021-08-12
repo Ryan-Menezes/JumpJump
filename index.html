@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+	<title>Jogo</title>
+	<meta charset="utf-8">
+	<script type="text/javascript" src="Sprite.js"></script>
+	<style type="text/css">
+		*{
+			margin: 0;
+			padding: 0;
+		}
+		canvas{
+			position: absolute;
+			top: 0px;
+			bottom: 0px;
+			left: 0px;
+			right: 0px;
+			margin: auto;
+		}
+	</style>
+</head>
+<body>
+	<script type="text/javascript">
+		//Variaveis do jogo
+
+		var canvas, ctx, ALTURA, LARGURA, frames = 0, jogo, record, pontosParaNovaFase = [5, 10, 15, 20], faseAtual = 0, VELOCIDADE = 6
+		const MAXPULOS = 3
+		const IMG = new Image()
+		const IMGHEART = new Image()
+		const IMGSTAR = new Image()
+
+		//Objetos
+
+		var labelNovaFase = {
+			texto: "",
+			opacidade: 0.0,
+			fadeIn: function(dt){
+				var fadeInId = setInterval(function(){
+					if(labelNovaFase.opacidade < 1.0){
+						labelNovaFase.opacidade += 0.01
+					}else{
+						clearInterval(fadeInId)
+					}
+				}, 10 * dt)
+			},
+			fadeOut: function(dt){
+				var fadeIOutId = setInterval(function(){
+					if(labelNovaFase.opacidade > 0.0){
+						labelNovaFase.opacidade -= 0.01
+					}else{
+						clearInterval(fadeIOutId)
+					}
+				}, 10 * dt)
+			}
+		}
+		var estados = {
+			jogar: 0,
+			jogando: 1,
+			perdeu: 2
+		}
+		var chao = {
+			y: 0,
+			x: 0,
+			altura: CHAO.altura,
+			atualiza: function(){
+				this.x -= VELOCIDADE
+
+				if(this.x <= -30){
+					this.x += 30
+				}
+			},
+			desenha: function(){
+				CHAO.desenha(this.x, this.y)
+				CHAO.desenha(this.x + CHAO.largura, this.y)
+			}
+		}
+		var bloco = {
+			x: 50,
+			y: 0,
+			altura: PERSONAGEM.altura,
+			largura: PERSONAGEM.largura,
+			gravidade: 1.5,
+			velocidade: 0,
+			forcaPulo: 20,
+			qtdePulos: 0,
+			score: 0,
+			rotacao: 0,
+			vidas: 3,
+			colidindo: false,
+			atualiza: function(){
+				this.velocidade += this.gravidade
+				this.y += this.velocidade
+
+				if((this.y + this.altura) >= chao.y && jogo != estados.perdeu){
+					this.y = (chao.y - this.altura)
+					this.qtdePulos = 0
+					this.velocidade = 0
+				}
+
+				this.rotacao += Math.PI / 180 * 10			
+			},
+			reset: function(){
+				this.y = bloco.altura
+				this.velocidade = 0
+				this.gravidade = 1.5
+
+				if(this.score > record){
+					record = localStorage.record = this.score
+				}
+
+				this.score = 0
+				this.vidas = 3
+				this.colidindo = false
+
+				VELOCIDADE = 6
+				faseAtual = 0
+			},
+			pula: function(){
+				if(this.qtdePulos < MAXPULOS){
+					this.qtdePulos++
+					this.velocidade = -this.forcaPulo
+				}
+			},
+			desenha: function(){
+				ctx.save()
+				ctx.translate(this.x + this.largura / 2, this.y + this.altura / 2)
+				ctx.rotate(this.rotacao)
+				PERSONAGEM.desenha(-this.largura / 2, -this.altura / 2)
+				ctx.restore()
+			}
+		}
+		var obstaculos = {
+			_obs: [],
+			sprites: [REDOBS, PINKOBS, BLUEOBS, GREENOBS, YELLOWOBS],
+			scored: false,
+			tempoInsere: 0,
+			insere: function(){
+				this._obs.push({
+					x: LARGURA,
+					largura: 50,//30 + Math.floor(Math.random() * 21),
+					altura: 30 + Math.floor(Math.random() * 90),
+					sprite: this.sprites[Math.floor(Math.random() * this.sprites.length)]
+				})
+
+				this.tempoInsere += 30 + Math.floor(Math.random() * 20)
+			},
+			atualiza: function(){
+				if(this.tempoInsere == 0){
+					this.insere()
+				}else{
+					this.tempoInsere--
+				}
+
+				for(let i in this._obs){
+					this._obs[i].x -=  VELOCIDADE
+
+					if(bloco.x < this._obs[i].x + this._obs[i].largura && bloco.x + bloco.largura >= this._obs[i].x && bloco.y + bloco.altura >= chao.y - this._obs[i].altura){
+
+						if(bloco.vidas > 0 && !bloco.colidindo){
+							bloco.vidas--
+							bloco.colidindo = true
+
+							if(bloco.vidas > 0)
+								this._obs.splice(i, 1)
+
+							setTimeout(() => bloco.colidindo = false, 500)
+						}
+
+						if(bloco.vidas == 0){
+							jogo = estados.perdeu
+						}
+						
+					}else if(this._obs[i].x <= 0 && jogo == estados.jogando && !this._obs[i].scored){
+						bloco.score++
+						this._obs[i].scored = true
+
+						if(bloco.score == pontosParaNovaFase[faseAtual] && faseAtual < pontosParaNovaFase.length){
+							passarFase()
+						}
+					}else if(this._obs[i].x <= -this._obs[i].largura){
+						this._obs.splice(i, 1)
+					}
+				}
+			},
+			limpa: function(){
+				this._obs = []
+			},
+			desenha: function(){
+				for(let _ob of this._obs){
+					ctx.drawImage(IMG, _ob.sprite.x, _ob.sprite.y, _ob.sprite.largura, _ob.altura, _ob.x, (chao.y - _ob.altura), _ob.largura, _ob.altura)
+				}
+			}
+		}
+
+		function clique(event){
+			if(jogo == estados.jogando){
+				bloco.pula()
+			}else if(jogo == estados.perdeu){
+				obstaculos.limpa()
+				bloco.reset()
+				jogo = estados.jogar
+				faseAtual == 0
+				labelNovaFase.fadeOut(0)
+			}else{
+				bloco.reset()
+				jogo = estados.jogando
+			}
+		}
+
+		function passarFase(){
+			faseAtual++
+			VELOCIDADE++
+			bloco.vidas++
+
+			if(faseAtual == 4){
+				bloco.gravidade -= 0.5
+			}
+
+			labelNovaFase.texto = `Level: ${faseAtual}`
+
+			let tmp = 0.4
+
+			labelNovaFase.fadeIn(tmp)
+
+			setTimeout(function(){labelNovaFase.fadeOut(tmp)}, 800)
+		}
+
+		function main(){
+			//Tamanho da tela do jogo
+
+			ALTURA = window.innerHeight
+			LARGURA = window.innerWidth
+
+			if(LARGURA >= 500){
+				ALTURA = 600
+				LARGURA = 600
+			}
+
+			chao.y = ALTURA - chao.altura
+			bloco.reset()
+
+			//Canvas
+
+			canvas = window.document.createElement("canvas")
+			canvas.width = LARGURA
+			canvas.height = ALTURA
+
+			// canvas.style.border = "1px solid black"
+
+			ctx = canvas.getContext("2d")
+			window.document.body.appendChild(canvas)
+
+			//Evento de clique
+
+			window.document.addEventListener("mousedown", clique)
+
+			//Estado do jogo
+
+			jogo = estados.jogar
+			VELOCIDADE = 6
+
+			//Fases do jogo
+
+			pontosParaNovaFase = [5, 10, 15, 20]
+			faseAtual = 0
+
+			//Record do jogo
+
+			if(localStorage.record == undefined){
+				localStorage.record = 0
+			}
+
+			record = localStorage.record
+
+			//Imagens do jogo
+
+			IMG.src = "./Imagens/sheet.png"	
+			IMGHEART.src = "./Imagens/heart.png"
+			IMGSTAR.src = "./Imagens/star.png"
+
+			//Loop
+
+			roda()			
+		}
+
+		function roda(){
+			atualiza()
+			desenha()
+
+			window.requestAnimationFrame(roda, canvas)
+		}
+
+		function atualiza(){
+			frames++
+
+			if(jogo == estados.jogando || jogo == estados.perdeu){
+				obstaculos.atualiza()
+			}
+
+			chao.atualiza()
+			bloco.atualiza()
+		}
+
+		function desenha(){
+			ctx.clearRect(0, 0, LARGURA, ALTURA)
+
+			BACKGROUND.desenha(0, 0)
+
+			obstaculos.desenha()
+			chao.desenha()
+			bloco.desenha()
+
+			if(jogo == estados.jogando){
+				//Fase
+
+				ctx.fillStyle = `rgba(0, 0, 0, ${labelNovaFase.opacidade})`
+				ctx.font = "40px Arial"
+				ctx.fillText(labelNovaFase.texto, canvas.width / 2 - ctx.measureText(labelNovaFase.texto).width / 2, canvas.height / 3)
+
+				//Score
+
+				ctx.drawImage(IMGSTAR, 0, 0, 512, 512, 20, 20, 60, 60)
+
+				ctx.fillStyle = "white"
+				ctx.font = "25px Arial"
+				ctx.fillText(bloco.score, 43, 62)
+
+				//Vidas
+
+				ctx.drawImage(IMGHEART, 0, 0, 256, 256, LARGURA - 70, 20, 60, 60)
+
+				ctx.fillText(bloco.vidas, LARGURA - 47, 57)
+			}
+
+			if(jogo == estados.jogar){
+				JOGAR.desenha(LARGURA / 2 - JOGAR.largura / 2, ALTURA / 2 - JOGAR.altura / 2)
+
+				if(bloco.score > record){
+					localStorage.record = record = bloco.score
+				}
+			}else if(jogo == estados.perdeu){
+				PERDEU.desenha(LARGURA / 2 - PERDEU.largura / 2, ALTURA / 2 - PERDEU.altura / 2 - RECORD.altura / 2)
+				RECORD.desenha(LARGURA / 2 - RECORD.largura / 2, PERDEU.altura + RECORD.altura / 2)
+
+				ctx.fillStyle = "white"
+				ctx.font = "50px Arial"
+				ctx.fillText(bloco.score, 375, 390)
+
+				if(bloco.score > record){
+					NOVO.desenha(LARGURA / 2 - 180, ALTURA / 2 + RECORD.altura / 2 - 20)
+				}
+
+				ctx.fillText(record, 420, 470)
+			}
+		}
+
+		//Inicializando o jogo
+
+		window.addEventListener("load", main)
+	</script>
+</body>
+</html>
